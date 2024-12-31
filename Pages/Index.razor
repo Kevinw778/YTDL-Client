@@ -1,0 +1,75 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@inject YoutubeDlService YoutubeDlService
+@inject NavigationManager Navigation
+
+<h3>YouTube Download Manager</h3>
+
+<input @bind="url" placeholder="Enter video URL" />
+<button @onclick="StartDownload">Download</button>
+
+<ul>
+    @foreach (var task in tasks)
+    {
+        <li>
+            <b>Task ID:</b> @task.Id <br />
+            <b>URL:</b> @task.Url <br />
+            <b>Status:</b> @task.Status <br />
+            <b>Progress:</b> @task.Progress
+        </li>
+    }
+</ul>
+
+@code {
+    private string url = string.Empty;
+    private List<DownloadTask> tasks = new();
+    private HubConnection? hubConnection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/signalrhub"))
+            .WithAutomaticReconnect()
+            .ConfigureLogging(logging =>
+            {
+                logging.SetMinimumLevel(LogLevel.Debug);
+            })
+            .Build();
+
+        hubConnection.On<string, string, string>("ReceiveUpdate", (taskId, status, progress) =>
+        {
+            var task = tasks.FirstOrDefault(t => t.Id == taskId);
+            if (task != null)
+            {
+                task.Status = status;
+                task.Progress = progress;
+                StateHasChanged();
+            }
+        });
+        
+        try
+        {            
+            await hubConnection.StartAsync();
+            tasks = YoutubeDlService.GetTasks();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error starting SignalR connection: {ex.Message}");
+        }
+    }
+
+    private void StartDownload()
+    {
+        var taskId = YoutubeDlService.StartDownload(url);
+        tasks = YoutubeDlService.GetTasks();
+        url = string.Empty;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+}
